@@ -5,6 +5,7 @@ import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { json } from "express";
 import jwt from "jsonwebtoken"
+import mongoose from "mongoose";
 
 const generateAcessandRefreshToken = async(userId)=>{
     try {
@@ -141,7 +142,7 @@ const logoutUser = asynchandler(async(req,res)=>{
         req.user._id,
         {
             $set:{
-                 refreshToken:undefined
+                 refreshToken:1//undefined se nhi hoga //this removes the field from this document
             }
         },
         {
@@ -333,6 +334,140 @@ const updateUserCoverimage = asynchandler(async(req,res)=>{
         new ApiResponse(200, user, "cover image updated successfully")
     )
 })
+// user se connect kr rahe hum
+const getUserChannelProfile = asynchandler(async(req,res)=>{
+        const {username} = req.params//its like url se username lena
+
+        if(!username?.trim()){
+            throw new ApiError(400,"user name is missing")
+        }
+
+        //User.find({username})--aise bhi kr sakte hai ki user find kr le query daalkr but instead we will use match function of aggregate
+        const channel = await User.aggregate([
+            {
+                $match:{
+                    usernmae:username?.toLowerCase()//ab suppose ek user aa gaya hai like chai aur code ab uske subscribers kitne hai vo find karenge
+                }
+            },
+            //ab find kr rahe chai aur code ke subscribers kitne hai
+            {
+                $lookup:{//iss pipeline ke andar saare documents ko ikhata kr ke rakh liya
+                    from:"subscriptions",//model mai lower case mai ho jaati aur plural ho jaati
+                    localField:"_id",
+                    foreignField:"channel",
+                    as:"subscribers"//channels ko saare select krke i got my subscribers 
+                }
+            },
+            //ab maine kitno ko subscribe kr rakha hai
+            {
+                $lookup:{
+                    from:"subscriptions",
+                    localField:"_id",
+                    foreignField:"subscriber",
+                    as:"subscribedTo"//maine kisko subscribe kr rakha hai
+                }
+            },
+            //additional fiels add karna
+            {
+                $addFields:{
+                    subscribersCount:{
+                         $size: "$subscribers"
+                    },
+                    channesSubscribedToCount:{
+                        $size: "$subscribedTo"
+                    },
+                    //for the button ki subscribe show krna hai ya subscribed
+                    isSubscribed:{
+                         $cond:{
+                            if:{$in: [req.user?._id, "$subscribers.subscriber"]},//in means present hai ki nhi
+                            then: true,
+                            else: false
+                         }
+                    }
+                }
+            },
+            //Final challenge-project--projection deta hai ki mai saari cheezo ko project nhi karunga mai selected dunga toh jo values mujhe deni hai unka flag on kr denge i.e 1 likh denge 
+            {
+                $project:{
+                    fullname: 1,
+                    username: 1,
+                    subscribersCount: 1,
+                    channesSubscribedToCount: 1,
+                    isSubscribed: 1,
+                    avatar: 1,
+                    coverimage: 1,
+                    email: 1
+                }
+
+            }
+        ])
+
+        console.log(channel) //aggregate array return krta hai
+
+        if(!channel?.length){
+            throw new ApiError(404,"channel does not exist")
+        }
+
+        return res
+        .status(200)
+        .json(
+            new ApiResponse(200, channel[0], "User channel fetched successfully")
+        )
+        
+})
+
+//watch history--idhar nested lookup krna padega because watch history se aapko videos ke saare documents mil jaayenge but videos ke andar ek owner bhi hai uski details bhi hume chaiye hongi
+const getWatchedhistory = asynchandler(async(req,res)=>{
+      const user = await User.aggregate([
+        {
+            $match:{
+                _id: new mongoose.Types.ObjectId(req.user._id)
+            }
+        },
+        {
+            $lookup:{//bahut saare videos ke documents iske andar aa gye hai
+                from: "videos",
+                localField: "watchHistory",
+                foreignField: "_id",
+                as: "watchedHistory",
+                pipeline: [
+                    {
+                        $lookup:{
+                            from:"users",
+                            localField:"owner",
+                            foreignField:"_id",//-19:20 timestamp
+                            as: "owner",
+                            pipeline:[
+                                {
+                                    $project:{
+                                        fullname:1,
+                                        username:1,
+                                        avatar:1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    //ye pipeline sirf frontend ko data ache se mile sirf isliye
+                    {
+                        $addFields:{
+                              owner:{
+                                $first:"$owner"
+                              }
+                        }
+                    }
+                ]
+            }
+        }
+      ])
+
+      return res
+      .status(200)
+      .json(
+        new ApiResponse(200, user[0].watchHistory, "Watch history fetched successfully")
+      )
+})
+
 
 export{
     registerUser,
@@ -343,5 +478,7 @@ export{
     getCurrentUser,
     updateAccountDetails,
     updateUserAvatar,
-    updateUserCoverimage
+    updateUserCoverimage,
+    getUserChannelProfile ,
+    getWatchedhistory
 }
