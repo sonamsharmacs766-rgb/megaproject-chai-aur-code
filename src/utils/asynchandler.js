@@ -1,16 +1,18 @@
-const asynhandler = (requesthandler)=>(req,res,next)=>{
+const asynchandler = (requesthandler)=>{
+    return (req,res,next)=>{
         Promise.resolve(requesthandler(req,res,next)).catch((err)=>next(err))
 }//this is through promise most common used and a good practice
+}
 
 
 
 
-export {asynhandler}
+export {asynchandler}
 
 
 
 
-/*const asynhandler = (func)=>async(res,req,next)=>{
+/*const asynchandler = (func)=>async(res,req,next)=>{
     try {
         await func(res,req,next)
     } catch (err) {
